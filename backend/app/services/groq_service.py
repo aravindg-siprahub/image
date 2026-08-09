@@ -83,11 +83,12 @@ IMPORTANT RULES:
                     }
                 ],
                 max_tokens=1024,
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"},
             )
             
             content = response.choices[0].message.content
-            # Qwen doesn't support json_object mode, so we parse manually
+            # JSON mode is requested via response_format; keep light cleanup for safety
             try:
                 # Basic cleanup if model surrounds it with markdown ```json ... ```
                 cleaned = content.replace("```json", "").replace("```", "").strip()
