@@ -9,19 +9,23 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.image import Image
 from app.models.image_analysis import ImageAnalysis
-from app.services.groq_service import groq_manager
+from app.services.vision_service import vision_manager
 from app.services.image_ranker import ranker
 from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 
+import asyncio
 
 async def analyze_single_image(db: AsyncSession, image: Image) -> ImageAnalysis | None:
     try:
         # Step 1: Generate a short-lived signed URL (5 minutes is enough for Groq fetch)
-        signed_url = storage_service.supabase.storage.from_(
-            storage_service.bucket_name
-        ).create_signed_url(image.storage_path, 300)
+        # Run synchronous network call in thread pool to prevent blocking
+        signed_url = await asyncio.to_thread(
+            storage_service.supabase.storage.from_(storage_service.bucket_name).create_signed_url,
+            image.storage_path, 
+            300
+        )
 
         if isinstance(signed_url, dict):
             url_to_use = signed_url.get("signedURL") or signed_url.get("signed_url")
@@ -33,9 +37,8 @@ async def analyze_single_image(db: AsyncSession, image: Image) -> ImageAnalysis 
             image.status = "failed"
             return None
 
-        # Step 2: Send to Groq for visual analysis
-        logger.info(f"Analyzing image {image.id} with Groq...")
-        analysis_data = await groq_manager.analyze_image(url_to_use)
+        # Step 2: Pass the signed URL to the Vision Service for analysis
+        analysis_data = await vision_manager.analyze_image(url_to_use)
 
         # Step 3: Extract is_usable from Groq observation
         is_usable = bool(analysis_data.get("is_usable", True))

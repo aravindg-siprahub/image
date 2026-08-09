@@ -10,7 +10,7 @@ supabase
 httpx
 python-multipart
 tenacity
-groq
+openai
 pillow
 numpy
 scikit-learn

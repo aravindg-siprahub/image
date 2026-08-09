@@ -27,9 +27,7 @@ export default function ProcessingState({ projectId, onComplete }: ProcessingSta
         
         if (data.status === "completed") {
           if (timerRef.current) clearInterval(timerRef.current);
-          setTimeout(() => {
-            if (mounted) onComplete();
-          }, 600); // Brief delay so user sees 100%
+          if (mounted) onComplete();
         } else if (data.status === "failed") {
           if (timerRef.current) clearInterval(timerRef.current);
           setErrorMsg("Analysis failed. Please try again.");

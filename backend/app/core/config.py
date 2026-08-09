@@ -6,10 +6,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SERVICE_ROLE_KEY: str
     SUPABASE_STORAGE_BUCKET: str = "imageupload"
-    GROQ_API_KEY: str | None = None
-    GROQ_API_KEY_2: str | None = None
-    GROQ_VISION_MODEL: str = "llama-3.2-90b-vision-preview"  # Fallback if not in env
-    GROQ_MAX_CONCURRENCY: int = 4
+    OPENAI_API_KEY: str | None = None
+    VISION_MODEL: str = "gpt-4o-mini"
+    MAX_CONCURRENCY: int = 8
     SIMILARITY_THRESHOLD: float = 0.90  # pHash+color combined similarity threshold
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
