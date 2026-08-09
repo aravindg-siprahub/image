@@ -1,7 +1,7 @@
-import os
 import re
 import json
 import asyncio
+from datetime import date
 from groq import AsyncGroq, RateLimitError
 from tenacity import (
     retry,
@@ -70,6 +70,45 @@ class GroqClientManager:
         self.current_client_index = 0
         self.lock = asyncio.Lock()
         self.semaphore = asyncio.Semaphore(settings.GROQ_MAX_CONCURRENCY)
+        # Soft in-process daily token tracker (single Railway instance).
+        self._usage_day: date = date.today()
+        self._tokens_used_today: int = 0
+
+    def _maybe_reset_daily_usage(self) -> None:
+        today = date.today()
+        if today != self._usage_day:
+            self._usage_day = today
+            self._tokens_used_today = 0
+
+    def _remaining_tokens(self) -> int:
+        self._maybe_reset_daily_usage()
+        return max(0, settings.GROQ_DAILY_TOKEN_BUDGET - self._tokens_used_today)
+
+    def _record_usage(self, response) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            # Fallback estimate when SDK omits usage
+            self._tokens_used_today += settings.GROQ_TOKEN_RESERVE_PER_IMAGE
+            return
+        total = getattr(usage, "total_tokens", None)
+        if total is None:
+            prompt_t = getattr(usage, "prompt_tokens", 0) or 0
+            completion_t = getattr(usage, "completion_tokens", 0) or 0
+            total = prompt_t + completion_t
+        try:
+            self._tokens_used_today += int(total)
+        except (TypeError, ValueError):
+            self._tokens_used_today += settings.GROQ_TOKEN_RESERVE_PER_IMAGE
+
+    def _ensure_token_budget(self) -> None:
+        remaining = self._remaining_tokens()
+        if remaining < settings.GROQ_TOKEN_RESERVE_PER_IMAGE:
+            raise QuotaExhaustedError(
+                f"quota exhausted, try later "
+                f"(remaining_tokens={remaining}, "
+                f"need>={settings.GROQ_TOKEN_RESERVE_PER_IMAGE})",
+                retry_after_s=None,
+            )
 
     async def get_next_client(self) -> AsyncGroq:
         async with self.lock:
@@ -87,6 +126,9 @@ class GroqClientManager:
         reraise=True,
     )
     async def analyze_image_with_retry(self, image_url: str) -> dict:
+        # Pre-flight soft budget check — avoid calling Groq when daily tokens are gone.
+        self._ensure_token_budget()
+
         client = await self.get_next_client()
         
         # We pass the proxy URL directly to Groq.
@@ -136,6 +178,7 @@ IMPORTANT RULES:
                 temperature=0.1,
                 response_format={"type": "json_object"},
             )
+            self._record_usage(response)
             
             content = response.choices[0].message.content
             # JSON mode is requested via response_format; keep light cleanup for safety
@@ -159,6 +202,8 @@ IMPORTANT RULES:
                     retry_after_s=ra,
                 ) from e
             # Short 429 — allow tenacity retry
+            raise
+        except QuotaExhaustedError:
             raise
         except Exception as e:
             logger.error(f"Groq API error on model {settings.GROQ_VISION_MODEL}: {e}")

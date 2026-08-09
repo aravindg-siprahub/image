@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY_2: str | None = None
     GROQ_VISION_MODEL: str = "qwen/qwen3.6-27b"
     GROQ_MAX_CONCURRENCY: int = 8
+    # Soft daily token budget (matches free-tier TPD). Skip Groq when remaining is too low.
+    GROQ_DAILY_TOKEN_BUDGET: int = 200000
+    GROQ_TOKEN_RESERVE_PER_IMAGE: int = 4000
     SIMILARITY_THRESHOLD: float = 0.90  # pHash+color combined similarity threshold
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
