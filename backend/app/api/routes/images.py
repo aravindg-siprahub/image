@@ -43,6 +43,8 @@ async def upload_image(
             content_type=file.content_type
         )
         file_url = storage_service.get_public_url(storage_path)
+        # Additive: resized/compressed sibling for Groq proxy + similarity (original unchanged).
+        storage_service.upload_analysis_derivative(storage_path, file_bytes)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -88,8 +90,8 @@ async def proxy_image(
         raise HTTPException(status_code=400, detail="Invalid storage path")
         
     try:
-        # 3. Download the raw bytes from Supabase
-        file_bytes = storage_service.download_image(image.storage_path)
+        # 3. Prefer resized analysis derivative (falls back to original if missing).
+        file_bytes = storage_service.download_analysis_or_original(image.storage_path)
         
         # 4. Return as image/jpeg (or infer from path)
         return Response(content=file_bytes, media_type="image/jpeg", headers={

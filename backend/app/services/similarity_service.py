@@ -369,7 +369,8 @@ class SimilarityService:
             )
             return {f"solo_{img.id}": [img] for img in images}
 
-        # Resolve URL provider
+        # Resolve URL provider (kept for callers that pass a custom provider; default unused
+        # now that embeddings load via storage_service.download_analysis_or_original).
         if signed_url_provider is None:
             from app.services.storage_service import storage_service
             def signed_url_provider(storage_path: str) -> Optional[str]:
@@ -383,8 +384,6 @@ class SimilarityService:
                 except Exception:
                     return None
 
-        import httpx
-
         # Download images and compute embeddings
         embeddings: list[ImageEmbedding] = []
         # Map image_id → Image model for output reconstruction
@@ -393,14 +392,9 @@ class SimilarityService:
         for img in images:
             emb = ImageEmbedding(img.id)
             try:
-                url = signed_url_provider(img.storage_path)
-                if not url:
-                    raise ValueError("No signed URL")
-
-                # Synchronous download (pipeline runs in background thread context)
-                resp = httpx.get(url, timeout=20)
-                resp.raise_for_status()
-                img_bytes = resp.content
+                # Prefer resized analysis derivative (same asset Groq proxy serves).
+                from app.services.storage_service import storage_service as _storage
+                img_bytes = _storage.download_analysis_or_original(img.storage_path)
 
                 emb = self.compute_embedding(img_bytes, img.id)
                 if emb.ok:
