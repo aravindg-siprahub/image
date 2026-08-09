@@ -1,12 +1,60 @@
 import os
+import re
 import json
 import asyncio
-from groq import AsyncGroq
-from tenacity import retry, stop_after_attempt, wait_exponential
+from groq import AsyncGroq, RateLimitError
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    before_sleep_log,
+    retry_if_exception,
+)
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Quota-exhaustion 429s often carry Retry-After of many minutes; do not burn retries.
+QUOTA_RETRY_AFTER_LIMIT_S = 10.0
+
+
+class QuotaExhaustedError(Exception):
+    """Non-retryable: Groq returned a long Retry-After 429 (daily/quota exhaustion)."""
+
+    def __init__(self, message: str, retry_after_s: float | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
+
+
+def _parse_retry_after_from_message(msg: str) -> float | None:
+    """Parse Groq body text like 'Please try again in 15m47.376s'."""
+    m = re.search(r"try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)s", msg, re.I)
+    if not m:
+        return None
+    minutes = float(m.group(1) or 0)
+    seconds = float(m.group(2))
+    return minutes * 60.0 + seconds
+
+
+def _extract_retry_after_seconds(exc: BaseException) -> float | None:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass
+    return _parse_retry_after_from_message(str(exc))
+
+
+def _is_retryable_groq_error(exc: BaseException) -> bool:
+    # QuotaExhaustedError must not be retried by tenacity.
+    return not isinstance(exc, QuotaExhaustedError)
+
 
 class GroqClientManager:
     def __init__(self):
@@ -34,7 +82,9 @@ class GroqClientManager:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        reraise=True
+        retry=retry_if_exception(_is_retryable_groq_error),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
     )
     async def analyze_image_with_retry(self, image_url: str) -> dict:
         client = await self.get_next_client()
@@ -96,6 +146,20 @@ IMPORTANT RULES:
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse JSON from Qwen: {content}")
                 raise ValueError("Invalid JSON from Groq vision model")
+        except RateLimitError as e:
+            ra = _extract_retry_after_seconds(e)
+            logger.error(
+                f"Groq 429 on model {settings.GROQ_VISION_MODEL}: "
+                f"retry_after_s={ra} error={e}"
+            )
+            # Long/unknown Retry-After = quota exhaustion — fail immediately, do not retry.
+            if ra is None or ra > QUOTA_RETRY_AFTER_LIMIT_S:
+                raise QuotaExhaustedError(
+                    f"Groq quota exhausted (retry_after_s={ra})",
+                    retry_after_s=ra,
+                ) from e
+            # Short 429 — allow tenacity retry
+            raise
         except Exception as e:
             logger.error(f"Groq API error on model {settings.GROQ_VISION_MODEL}: {e}")
             raise e
