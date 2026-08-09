@@ -1,47 +1,35 @@
 import os
 import json
 import asyncio
-import base64
-import httpx
-from openai import AsyncOpenAI
+from groq import AsyncGroq
 from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
 
-class VisionClientManager:
+class GroqClientManager:
     def __init__(self):
         self.clients = []
-        if settings.OPENAI_API_KEY:
-            self.clients.append(AsyncOpenAI(api_key=settings.OPENAI_API_KEY))
+        if settings.GROQ_API_KEY:
+            self.clients.append(AsyncGroq(api_key=settings.GROQ_API_KEY))
+        if settings.GROQ_API_KEY_2:
+            self.clients.append(AsyncGroq(api_key=settings.GROQ_API_KEY_2))
             
         if not self.clients:
-            logger.warning("No OpenAI API keys found. Vision analysis will fail.")
+            logger.warning("No Groq API keys found. Vision analysis will fail.")
             
         self.current_client_index = 0
         self.lock = asyncio.Lock()
-        self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENCY)
-        
-        # Shared HTTP client for all image downloads
-        self.http_client = httpx.AsyncClient(timeout=30)
+        self.semaphore = asyncio.Semaphore(settings.GROQ_MAX_CONCURRENCY)
 
-    async def get_next_client(self) -> AsyncOpenAI:
+    async def get_next_client(self) -> AsyncGroq:
         async with self.lock:
             if not self.clients:
-                raise ValueError("No OpenAI clients available.")
+                raise ValueError("No Groq clients available.")
             client = self.clients[self.current_client_index]
             self.current_client_index = (self.current_client_index + 1) % len(self.clients)
             return client
-
-    async def _fetch_image_as_base64(self, url: str) -> str:
-        resp = await self.http_client.get(url)
-        resp.raise_for_status()
-        
-        # check content type
-        content_type = resp.headers.get('content-type', 'image/jpeg')
-        b64_data = base64.b64encode(resp.content).decode('utf-8')
-        return f"data:{content_type};base64,{b64_data}"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -51,14 +39,7 @@ class VisionClientManager:
     async def analyze_image_with_retry(self, image_url: str) -> dict:
         client = await self.get_next_client()
         
-        # Download image and convert to base64. 
-        # This is the safest approach because Supabase often returns 403 Forbidden to AI web scrapers fetching URLs directly.
-        try:
-            image_payload = await self._fetch_image_as_base64(image_url)
-        except Exception as e:
-            logger.error(f"Failed to fetch image for base64 encoding: {e}")
-            raise ValueError("invalid image data")
-            
+        # We pass the proxy URL directly to Groq.
         prompt = """You are a professional photo quality analyst. Analyze this image and score ONLY what you can directly observe.
 
 Return ONLY valid JSON with these exact fields:
@@ -86,7 +67,7 @@ IMPORTANT RULES:
 
         try:
             response = await client.chat.completions.create(
-                model=settings.VISION_MODEL,
+                model=settings.GROQ_VISION_MODEL,
                 messages=[
                     {
                         "role": "user",
@@ -95,25 +76,31 @@ IMPORTANT RULES:
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": image_payload,
+                                    "url": image_url,
                                 }
                             }
                         ]
                     }
                 ],
-                response_format={"type": "json_object"},
                 max_tokens=1024,
                 temperature=0.1
             )
             
             content = response.choices[0].message.content
-            return json.loads(content)
+            # Qwen doesn't support json_object mode, so we parse manually
+            try:
+                # Basic cleanup if model surrounds it with markdown ```json ... ```
+                cleaned = content.replace("```json", "").replace("```", "").strip()
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON from Qwen: {content}")
+                raise ValueError("Invalid JSON from Groq vision model")
         except Exception as e:
-            logger.error(f"OpenAI API error on model {settings.VISION_MODEL}: {e}")
+            logger.error(f"Groq API error on model {settings.GROQ_VISION_MODEL}: {e}")
             raise e
 
     async def analyze_image(self, image_url: str) -> dict:
         async with self.semaphore:
             return await self.analyze_image_with_retry(image_url)
 
-vision_manager = VisionClientManager()
+groq_manager = GroqClientManager()

@@ -25,4 +25,8 @@ class StorageService:
     def get_public_url(self, storage_path: str) -> str:
         return self.supabase.storage.from_(self.bucket_name).get_public_url(storage_path)
 
+    def download_image(self, storage_path: str) -> bytes:
+        response = self.supabase.storage.from_(self.bucket_name).download(storage_path)
+        return response
+
 storage_service = StorageService()

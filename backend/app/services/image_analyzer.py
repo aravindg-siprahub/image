@@ -9,9 +9,10 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.image import Image
 from app.models.image_analysis import ImageAnalysis
-from app.services.vision_service import vision_manager
+from app.services.groq_service import groq_manager
 from app.services.image_ranker import ranker
 from app.services.storage_service import storage_service
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +20,12 @@ import asyncio
 
 async def analyze_single_image(db: AsyncSession, image: Image) -> ImageAnalysis | None:
     try:
-        # Step 1: Generate a short-lived signed URL (5 minutes is enough for Groq fetch)
-        # Run synchronous network call in thread pool to prevent blocking
-        signed_url = await asyncio.to_thread(
-            storage_service.supabase.storage.from_(storage_service.bucket_name).create_signed_url,
-            image.storage_path, 
-            300
-        )
+        # Construct proxy URL for Groq to fetch the image from our backend
+        base_api_url = os.environ.get("NEXT_PUBLIC_API_URL", "http://localhost:8080/api/v1").rstrip("/")
+        proxy_url = f"{base_api_url}/images/proxy/{image.id}.jpg"
 
-        if isinstance(signed_url, dict):
-            url_to_use = signed_url.get("signedURL") or signed_url.get("signed_url")
-        else:
-            url_to_use = signed_url
-
-        if not url_to_use:
-            logger.error(f"Failed to create signed URL for image {image.id}")
-            image.status = "failed"
-            return None
-
-        # Step 2: Pass the signed URL to the Vision Service for analysis
-        analysis_data = await vision_manager.analyze_image(url_to_use)
+        # Step 2: Pass the proxy URL to Groq
+        analysis_data = await groq_manager.analyze_image(proxy_url)
 
         # Step 3: Extract is_usable from Groq observation
         is_usable = bool(analysis_data.get("is_usable", True))

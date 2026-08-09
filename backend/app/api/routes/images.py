@@ -67,3 +67,33 @@ async def upload_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database failure: {str(e)}"
         )
+
+from fastapi.responses import Response
+from sqlalchemy import select
+
+@router.get("/proxy/{image_id}.jpg")
+async def proxy_image(
+    image_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Validate image_id and lookup in Postgres
+    result = await db.execute(select(Image).where(Image.id == image_id))
+    image = result.scalars().first()
+    
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+        
+    # 2. Prevent arbitrary URL access and validate storage path
+    if not image.storage_path or not image.storage_path.startswith("projects/"):
+        raise HTTPException(status_code=400, detail="Invalid storage path")
+        
+    try:
+        # 3. Download the raw bytes from Supabase
+        file_bytes = storage_service.download_image(image.storage_path)
+        
+        # 4. Return as image/jpeg (or infer from path)
+        return Response(content=file_bytes, media_type="image/jpeg", headers={
+            "Cache-Control": "public, max-age=3600"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
