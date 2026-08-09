@@ -67,19 +67,33 @@ async def get_analysis_status(project_id: str, db: AsyncSession = Depends(get_db
     
     failed_stmt = select(func.count(Image.id)).where(Image.project_id == project_id, Image.status == "failed")
     failed = (await db.execute(failed_stmt)).scalar() or 0
+
+    quota_stmt = select(func.count(Image.id)).where(
+        Image.project_id == project_id, Image.status == "quota_exhausted"
+    )
+    quota_exhausted = (await db.execute(quota_stmt)).scalar() or 0
+
+    retry_stmt = select(func.max(Image.retry_after_s)).where(
+        Image.project_id == project_id, Image.status == "quota_exhausted"
+    )
+    retry_after_s = (await db.execute(retry_stmt)).scalar()
     
     selected_stmt = select(func.count(ImageAnalysis.id)).join(Image).where(
         Image.project_id == project_id, ImageAnalysis.recommendation == "keep"
     )
     selected = (await db.execute(selected_stmt)).scalar() or 0
     
-    pipeline_status = "completed" if (processed + failed == total and total > 0) else project.status
+    # quota_exhausted counts as a terminal outcome (like failed) for completion.
+    done = processed + failed + quota_exhausted
+    pipeline_status = "completed" if (done == total and total > 0) else project.status
     
     return {
         "status": pipeline_status,
         "total": total,
         "processed": processed,
         "failed": failed,
+        "quota_exhausted": quota_exhausted,
+        "retry_after_s": retry_after_s,
         "selected": selected
     }
 
@@ -112,7 +126,8 @@ async def get_project_images(project_id: str, db: AsyncSession = Depends(get_db)
         img, analysis = row
         if analysis and analysis.final_score is not None:
             return analysis.final_score
-        if img.status == "failed": return -2.0
+        if img.status in ("failed", "quota_exhausted"):
+            return -2.0
         return -1.0
         
     rows.sort(key=get_score, reverse=True)
@@ -133,6 +148,7 @@ async def get_project_images(project_id: str, db: AsyncSession = Depends(get_db)
             "file_url": url,
             "storage_path": img.storage_path,   # needed for download
             "status": img.status,
+            "retry_after_s": img.retry_after_s,
             "final_score": analysis.final_score if analysis else None,
             "recommendation": analysis.recommendation if analysis else None,
             "reason": analysis.reason if analysis else None,

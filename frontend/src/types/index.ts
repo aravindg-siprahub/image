@@ -9,7 +9,8 @@ export interface ImageRecord {
   image_id: string;
   project_id: string;
   file_url: string;
-  status: 'uploaded' | 'analyzing' | 'analyzed' | 'selected' | 'failed';
+  status: 'uploaded' | 'analyzing' | 'analyzed' | 'selected' | 'failed' | 'quota_exhausted';
+  retry_after_s?: number | null;
   final_score: number | null;
   recommendation: 'keep' | 'remove' | 'replace' | null;
   reason: string | null;
@@ -24,6 +25,8 @@ export interface AnalysisStatus {
   total: number;
   processed: number;
   failed: number;
+  quota_exhausted?: number;
+  retry_after_s?: number | null;
   selected: number;
 }
 

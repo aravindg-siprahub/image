@@ -57,11 +57,46 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
   }
 
   /* ── Compute sets ── */
-  const totalAnalyzed = images.filter(i => i.status !== "failed").length;
+  const totalAnalyzed = images.filter(i => i.status === "analyzed" || i.recommendation).length;
   const bestPhotos = images.filter(i => i.recommendation === "keep");
+  const quotaImages = images.filter(i => i.status === "quota_exhausted");
+  const failedImages = images.filter(i => i.status === "failed");
+  const maxRetryAfter = quotaImages.reduce<number | null>((max, img) => {
+    const v = img.retry_after_s;
+    if (v == null) return max;
+    if (max == null) return v;
+    return Math.max(max, v);
+  }, null);
+  const retryMinutes = maxRetryAfter != null ? Math.max(1, Math.ceil(maxRetryAfter / 60)) : null;
 
   /* ── Empty (nothing kept) ── */
   if (bestPhotos.length === 0) {
+    // Distinct quota UX — do not collapse into "nothing was analyzed"
+    if (quotaImages.length > 0) {
+      return (
+        <div className="text-center py-24 bg-white rounded-2xl border border-slate-100 shadow-sm px-6">
+          <p className="text-2xl font-black text-slate-800 mb-2">Analysis paused</p>
+          <p className="text-slate-500">
+            Daily AI quota reached.
+            {retryMinutes != null
+              ? ` Try again in ~${retryMinutes} minute${retryMinutes === 1 ? "" : "s"}.`
+              : " Try again later."}
+          </p>
+        </div>
+      );
+    }
+
+    if (failedImages.length > 0 && totalAnalyzed === 0) {
+      return (
+        <div className="text-center py-24 bg-white rounded-2xl border border-slate-100 shadow-sm px-6">
+          <p className="text-2xl font-black text-slate-800 mb-2">Analysis failed</p>
+          <p className="text-slate-500">
+            We couldn&apos;t analyze your photos. Please try again.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="text-center py-24 bg-white rounded-2xl border border-slate-100 shadow-sm px-6">
         <p className="text-2xl font-black text-slate-800 mb-2">No photos met the quality bar</p>

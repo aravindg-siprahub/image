@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.image import Image
 from app.models.image_analysis import ImageAnalysis
-from app.services.groq_service import groq_manager
+from app.services.groq_service import groq_manager, QuotaExhaustedError
 from app.services.image_ranker import ranker
 from app.services.storage_service import storage_service
 import os
@@ -53,6 +53,7 @@ async def analyze_single_image(db: AsyncSession, image: Image) -> ImageAnalysis 
 
         db.add(analysis)
         image.status = "analyzed"
+        image.retry_after_s = None
 
         logger.info(
             f"Image {image.id} analyzed: final_score={final_score:.1f}, "
@@ -63,7 +64,16 @@ async def analyze_single_image(db: AsyncSession, image: Image) -> ImageAnalysis 
         # Do NOT commit here — pipeline does a batch commit
         return analysis
 
+    except QuotaExhaustedError as e:
+        # Distinct from generic failure so the Results UI can show quota messaging.
+        image.status = "quota_exhausted"
+        image.retry_after_s = e.retry_after_s
+        logger.error(
+            f"Quota exhausted for image {image.id}: retry_after_s={e.retry_after_s}"
+        )
+        return None
     except Exception as e:
         logger.error(f"Failed to analyze image {image.id}: {e}")
         image.status = "failed"
+        image.retry_after_s = None
         return None
