@@ -1,53 +1,103 @@
 "use client";
 
 import { ImageRecord } from "@/types";
-import { Maximize2 } from "lucide-react";
+import { Download, Share2 } from "lucide-react";
 
 interface ImageCardProps {
   image: ImageRecord;
   index: number;
+  projectId: string;
 }
 
-export default function ImageCard({ image, index }: ImageCardProps) {
-  const scoreColor = (image.final_score || 0) >= 70 ? "text-green-600" : 
-                    (image.final_score || 0) >= 50 ? "text-orange-500" : "text-red-500";
+async function shareImage(image: ImageRecord, projectId: string) {
+  const title = `Photo #${image.image_id?.slice(0, 6)} — LensAI`;
+  const text = `Check out this AI-selected photo from my LensAI collection!`;
+  const url = `${window.location.origin}/gallery/${projectId}`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch {
+      // User cancelled or share failed → fall through to copy
+    }
+  }
+
+  // Fallback: copy link to clipboard
+  try {
+    await navigator.clipboard.writeText(url);
+    alert("Link copied to clipboard!");
+  } catch {
+    prompt("Copy this link:", url);
+  }
+}
+
+function downloadSingleImage(image: ImageRecord) {
+  if (!image.file_url) return;
+  const a = document.createElement("a");
+  a.href = image.file_url;
+  a.download = `lensai_photo_${image.image_id?.slice(0, 8) ?? "image"}.jpg`;
+  a.target = "_blank"; // signed URL must open in same origin
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+export default function ImageCard({ image, index, projectId }: ImageCardProps) {
+  const score = Math.round(image.final_score || 0);
+  const scoreColor =
+    score >= 80 ? "text-emerald-600" :
+    score >= 65 ? "text-green-600" :
+    score >= 50 ? "text-orange-500" : "text-red-500";
+
+  const scoreBg =
+    score >= 80 ? "bg-emerald-50 border-emerald-200" :
+    score >= 65 ? "bg-green-50 border-green-200" :
+    "bg-orange-50 border-orange-200";
 
   return (
-    <div className="group relative rounded-2xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow break-inside-avoid mb-6">
-      
-      {/* Rank Badge - Top Left */}
-      <div className="absolute top-3 left-3 z-10">
-        <div className="flex items-center gap-1.5 bg-white/95 backdrop-blur shadow-sm px-3 py-1.5 rounded-lg text-sm font-black uppercase tracking-wider text-slate-700">
-          #{index + 1}
-        </div>
-      </div>
-      
-      {/* Action buttons - Top Right */}
-      <div className="absolute top-3 right-3 z-10 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button className="w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-700 flex items-center justify-center shadow-sm backdrop-blur transition-colors">
-          <Maximize2 className="w-4 h-4" />
-        </button>
-      </div>
+    <div className="group relative rounded-2xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
 
-      {/* Main Image */}
-      <div className="relative w-full overflow-hidden bg-slate-50">
-        <img 
-          src={image.file_url} 
-          alt={`Result ${index + 1}`} 
+      {/* Image */}
+      <div className="relative w-full overflow-hidden bg-slate-100">
+        <img
+          src={image.file_url!}
+          alt={`Photo ${index + 1}`}
           className="w-full h-auto object-contain block"
           loading="lazy"
+          decoding="async"
         />
+
+        {/* Rank badge — top-left */}
+        <div className="absolute top-2.5 left-2.5 bg-white/95 backdrop-blur-sm text-slate-800 text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">
+          #{index + 1}
+        </div>
+
+        {/* Score badge — top-right */}
+        <div className={`absolute top-2.5 right-2.5 ${scoreBg} border text-[11px] font-black px-2.5 py-1 rounded-lg shadow-sm backdrop-blur-sm flex items-center gap-1`}>
+          <span className={scoreColor}>{score}</span>
+          <span className="text-slate-400 font-normal">/100</span>
+        </div>
       </div>
 
-      {/* Quality Score Panel */}
-      <div className="p-4 flex items-center justify-between bg-white">
-        <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Quality Score</p>
-        <div className="flex items-baseline gap-1">
-          <span className={`text-2xl font-black tracking-tight leading-none ${scoreColor}`}>
-            {Math.round(image.final_score || 0)}
-          </span>
-          <span className="text-xs font-bold text-slate-300">/ 100</span>
-        </div>
+      {/* Action row */}
+      <div className="flex items-center gap-2 p-3 border-t border-slate-100">
+        <button
+          onClick={() => downloadSingleImage(image)}
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-700 active:scale-95 transition-all"
+          title="Download this photo"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download
+        </button>
+        <button
+          onClick={() => shareImage(image, projectId)}
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg bg-white text-slate-700 border border-slate-200 hover:border-slate-300 active:scale-95 transition-all"
+          title="Share this photo"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          Share
+        </button>
       </div>
     </div>
   );

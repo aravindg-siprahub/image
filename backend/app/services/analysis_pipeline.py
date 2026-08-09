@@ -73,68 +73,66 @@ async def run_analysis_pipeline(project_id: str):
             }
 
             # --- Step 5: Best-of-group selection ---
-            group_winners = []
-            
+            # Each similarity group contributes exactly ONE candidate (its best image).
+            # Near-duplicates (weaker images in the same group) are always removed.
+            group_winners: list[ImageAnalysis] = []
+
             for group_id, group_imgs in groups.items():
                 group_analyses = [
                     analysis_by_image_id[img.id]
                     for img in group_imgs
                     if img.id in analysis_by_image_id
                 ]
-
                 if not group_analyses:
                     continue
 
-                # Sort group by final_score descending
+                # Sort group by final_score descending — best first
                 group_analyses.sort(key=lambda a: a.final_score or 0.0, reverse=True)
 
-                # Best image in group
                 best = group_analyses[0]
                 best.similarity_group = group_id
-                
-                # Only consider it a potential winner if it's usable and passes a basic quality floor
-                if best.is_usable and (best.final_score or 0.0) >= 55.0:
-                    group_winners.append(best)
-                else:
-                    best.recommendation = "remove"
 
-                # All other images in group: marked as 'remove' (we don't show 'replace' anymore in the simplified UI)
+                # Mark all weaker near-duplicates as removed immediately
                 for other in group_analyses[1:]:
                     other.similarity_group = group_id
                     other.recommendation = "remove"
-            
-            # --- Step 5b: Select the absolute best from the group winners ---
-            # Sort all group winners globally by score
-            group_winners.sort(key=lambda a: a.final_score or 0.0, reverse=True)
-            
-            # Target count: roughly 25% of total, but aim for ~5 if 20 uploaded
-            target_count = max(3, int(len(images) * 0.25))
-            if len(images) >= 15 and len(images) <= 25:
-                target_count = 5
-                
-            # Take the top N that pass a strict quality bar
-            # A strict bar ensures we don't just fill to the target count with bad photos
-            strict_quality_threshold = 65.0
-            
-            selected_count = 0
+
+                # Best candidate moves on to quality threshold check
+                group_winners.append(best)
+
+            # --- Step 5b: Quality threshold — keep EVERY winner that is good enough ---
+            # No fixed count cap. Each image earns its place independently.
+            # QUALITY_THRESHOLD = 65: reflects genuinely usable, well-exposed, reasonably sharp photo.
+            QUALITY_THRESHOLD = 65.0
+            # Fallback threshold: used only if zero images pass the strict bar, to ensure
+            # at least 1 result is shown rather than an empty gallery.
+            FALLBACK_THRESHOLD = 50.0
+
             for winner in group_winners:
                 score = winner.final_score or 0.0
-                if selected_count < target_count and score >= strict_quality_threshold:
+                if not winner.is_usable:
+                    winner.recommendation = "remove"
+                elif score >= QUALITY_THRESHOLD:
                     winner.recommendation = "keep"
-                    selected_count += 1
                 else:
-                    # If we haven't hit target_count, but the score is between 55 and 65, 
-                    # we only keep it if we desperately need images (e.g. we have 0 or 1).
-                    if selected_count < max(1, target_count // 2) and score >= 55.0:
-                        winner.recommendation = "keep"
-                        selected_count += 1
-                    else:
-                        winner.recommendation = "remove"
+                    winner.recommendation = "remove"
 
-            # Fallback for images not in any group
+            # Safety fallback: if nothing passed, lower the bar once
+            kept = [a for a in group_winners if a.recommendation == "keep"]
+            if not kept:
+                for winner in group_winners:
+                    if winner.is_usable and (winner.final_score or 0.0) >= FALLBACK_THRESHOLD:
+                        winner.recommendation = "keep"
+                        logger.info(
+                            f"Fallback: keeping image {winner.image_id[:8]} "
+                            f"with score {winner.final_score:.1f} (below strict threshold)"
+                        )
+
+            # Any analysis not assigned a recommendation yet → remove
             for analysis in valid_analyses:
                 if analysis.recommendation is None:
                     analysis.recommendation = "remove"
+
 
 
             # --- Step 7: Identify the global top pick ---
