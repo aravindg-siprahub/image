@@ -2,7 +2,7 @@ import re
 import json
 import asyncio
 from datetime import date
-from groq import AsyncGroq, RateLimitError
+from groq import AsyncGroq, RateLimitError, BadRequestError
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -25,6 +25,10 @@ class QuotaExhaustedError(Exception):
     def __init__(self, message: str, retry_after_s: float | None = None):
         super().__init__(message)
         self.retry_after_s = retry_after_s
+
+
+class JsonModeEmptyError(Exception):
+    """Non-retryable: json_validate_failed with empty failed_generation (retry burns quota)."""
 
 
 def _parse_retry_after_from_message(msg: str) -> float | None:
@@ -51,9 +55,38 @@ def _extract_retry_after_seconds(exc: BaseException) -> float | None:
     return _parse_retry_after_from_message(str(exc))
 
 
+def _is_empty_json_validate_failed(exc: BaseException) -> bool:
+    """
+    Detect Groq 400 json_validate_failed with empty failed_generation.
+    Observed with qwen/qwen3.6-27b + response_format json_object — retrying
+    only burns TPD before the real quota 429.
+    """
+    body = getattr(exc, "body", None)
+    err = None
+    if isinstance(body, dict):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+    if not isinstance(err, dict):
+        # Fall back to parsing the string form of the exception
+        msg = str(exc)
+        if "json_validate_failed" not in msg:
+            return False
+        return (
+            "failed_generation': ''" in msg
+            or 'failed_generation": ""' in msg
+            or "failed_generation': \"\"" in msg
+        )
+    code = err.get("code")
+    failed_generation = err.get("failed_generation")
+    return code == "json_validate_failed" and (
+        failed_generation is None or failed_generation == ""
+    )
+
+
 def _is_retryable_groq_error(exc: BaseException) -> bool:
-    # QuotaExhaustedError must not be retried by tenacity.
-    return not isinstance(exc, QuotaExhaustedError)
+    # Hard-fail paths must not be retried by tenacity.
+    if isinstance(exc, (QuotaExhaustedError, JsonModeEmptyError)):
+        return False
+    return True
 
 
 class GroqClientManager:
@@ -203,7 +236,20 @@ IMPORTANT RULES:
                 ) from e
             # Short 429 — allow tenacity retry
             raise
+        except BadRequestError as e:
+            if _is_empty_json_validate_failed(e):
+                logger.error(
+                    f"Groq json_validate_failed with empty failed_generation "
+                    f"on {settings.GROQ_VISION_MODEL} — failing fast (no retry): {e}"
+                )
+                raise JsonModeEmptyError(
+                    "Groq JSON mode returned empty failed_generation"
+                ) from e
+            logger.error(f"Groq API error on model {settings.GROQ_VISION_MODEL}: {e}")
+            raise
         except QuotaExhaustedError:
+            raise
+        except JsonModeEmptyError:
             raise
         except Exception as e:
             logger.error(f"Groq API error on model {settings.GROQ_VISION_MODEL}: {e}")
