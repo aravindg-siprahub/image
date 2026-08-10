@@ -50,6 +50,16 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
     );
     
     if (validFiles.length === 0) return;
+
+    // Warn about very large files (>50MB each can time out on slow mobile connections)
+    const largeFiles = validFiles.filter(f => f.size > 50 * 1024 * 1024);
+    if (largeFiles.length > 0) {
+      setErrorMsg(
+        `${largeFiles.length} photo${largeFiles.length > 1 ? 's are' : ' is'} very large (>50MB). ` +
+        "Upload may be slower on mobile."
+      );
+      setTimeout(() => setErrorMsg(null), 5000);
+    }
     
     const newFilesWithStatus: FileWithStatus[] = validFiles.map(f => ({
       file: f,
@@ -101,7 +111,12 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
         currentProjectId = proj.id;
         onUploadsStarted(currentProjectId);
       } catch (e: any) {
-        setErrorMsg(e.message || "Failed to create project. Please try again.");
+        const msg = e.message || "";
+        if (msg.toLowerCase().includes("fetch") || msg.toLowerCase().includes("network")) {
+          setErrorMsg("Cannot reach the server. Check your internet connection and try again.");
+        } else {
+          setErrorMsg(e.message || "Failed to start. Please try again.");
+        }
         setIsProcessing(false);
         return;
       }
