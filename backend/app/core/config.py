@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     QUALITY_THRESHOLD: float = 38.0
     QUALITY_FLOOR: float = 25.0
 
+    # Bounded ML concurrency (default 2 for Railway 500MB tier stability)
+    MAX_ML_CONCURRENCY: int = 2
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
 
 settings = Settings()

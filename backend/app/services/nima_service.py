@@ -36,13 +36,17 @@ class NimaService:
         Performance: pre-downscales to max 448px before center-crop so PIL never
         holds a full 108MP image in memory during NIMA preprocessing.
         """
+        from PIL import ImageOps
         with Image.open(io.BytesIO(image_bytes)) as img:
-            img = img.convert("RGB")
+            # Safely apply EXIF orientation so portrait photos don't get squished sideways
+            img = ImageOps.exif_transpose(img)
 
             # Fast pre-downscale: shrink to max 448px (2× the 224 NIMA input)
-            # before doing any crop math — avoids holding 108MP in memory
+            # BEFORE converting to RGB to prevent 108MP memory explosion
             if img.width > 448 or img.height > 448:
-                img.thumbnail((448, 448), Image.Resampling.BILINEAR)
+                img.thumbnail((448, 448), Image.Resampling.LANCZOS)
+                
+            img = img.convert("RGB")
 
             # Resize so shortest edge is 224
             aspect = img.width / img.height

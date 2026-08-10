@@ -12,7 +12,8 @@ from app.db.session import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 # Bound CPU inference to prevent overloading Railway's 1vCPU limit
-CPU_INFERENCE_SEMAPHORE = asyncio.BoundedSemaphore(4)
+from app.core.config import settings
+CPU_INFERENCE_SEMAPHORE = asyncio.BoundedSemaphore(settings.MAX_ML_CONCURRENCY)
 
 
 async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> None:

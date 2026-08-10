@@ -51,7 +51,9 @@ class TechnicalAnalyzer:
                 img.verify()
 
             # Reopen for real processing
+            from PIL import ImageOps
             with Image.open(io.BytesIO(image_bytes)) as img:
+                img = ImageOps.exif_transpose(img)
                 orig_w, orig_h = img.width, img.height
 
                 # FIX OOM: Resize immediately using thumbnail BEFORE converting to L
