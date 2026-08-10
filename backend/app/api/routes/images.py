@@ -95,12 +95,28 @@ async def proxy_image(
         raise HTTPException(status_code=400, detail="Invalid storage path")
         
     try:
-        # 3. Prefer resized analysis derivative (falls back to original if missing).
+        # 3. Download from Supabase and stream back
         file_bytes = storage_service.download_image(image.storage_path)
-        
-        # 4. Return as image/jpeg (or infer from path)
-        return Response(content=file_bytes, media_type="image/jpeg", headers={
-            "Cache-Control": "public, max-age=3600"
-        })
+
+        # 4. Derive extension from storage path
+        ext = image.storage_path.rsplit(".", 1)[-1].lower() if "." in image.storage_path else "jpg"
+        content_type_map = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+            "heic": "image/heic",
+        }
+        ct = content_type_map.get(ext, "image/jpeg")
+        filename = f"lensai_photo_{image_id[:8]}.{ext}"
+
+        return Response(
+            content=file_bytes,
+            media_type=ct,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "Content-Disposition": f"attachment; filename={filename}",
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch image: {str(e)}")
