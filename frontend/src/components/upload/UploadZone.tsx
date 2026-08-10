@@ -18,7 +18,7 @@ interface FileWithStatus {
   error?: string;
 }
 
-const MAX_CONCURRENT_UPLOADS = 5;
+const MAX_CONCURRENT_UPLOADS = 3; // Reduced from 5 for safe mobile uploads
 
 export default function UploadZone({ onUploadsStarted, onUploadsCompleted, projectId, triggerRef }: UploadZoneProps) {
   const [files, setFiles] = useState<FileWithStatus[]>([]);
@@ -45,8 +45,9 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
   }, [files]);
 
   const handleFilesAdded = (newFiles: File[]) => {
+    // Remove HEIC from explicit accepted types to trigger iOS/Android auto-transcoding to JPEG
     const validFiles = newFiles.filter(f => 
-      f.type.startsWith("image/") || f.name.toLowerCase().endsWith(".heic")
+      f.type.startsWith("image/")
     );
     
     if (validFiles.length === 0) return;
@@ -180,17 +181,23 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
     });
     
     // Check if any errors occurred
-    const hasErrors = files.some(f => f.status === "error");
-    const hasSuccess = files.some(f => f.status === "success");
+    const errorCount = files.filter(f => f.status === "error").length;
+    const successCount = files.filter(f => f.status === "success").length;
     
-    if (hasErrors && !hasSuccess) {
-      setErrorMsg("All uploads failed. Please try again.");
+    if (errorCount > 0) {
+      if (successCount === 0) {
+        setErrorMsg("Upload failed. Check your connection and try again.");
+      } else {
+        setErrorMsg(`${successCount} photos uploaded. ${errorCount} couldn't be uploaded.`);
+        // Start analysis in background for the successful ones so they don't wait
+        try { await startAnalysis(currentProjectId as string); } catch (e) {}
+      }
       setIsProcessing(false);
       return;
     }
     
     // If we have at least one success, start analysis
-    if (hasSuccess) {
+    if (successCount > 0) {
       try {
         await startAnalysis(currentProjectId as string);
         onUploadsCompleted();
@@ -244,7 +251,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
             
             {/* Format labels */}
             <p className="text-[11px] text-slate-400 font-medium tracking-widest uppercase">
-              JPG · PNG · WEBP · HEIC &nbsp;·&nbsp; Up to 100+ photos
+              JPG · PNG · WEBP &nbsp;·&nbsp; Up to 100+ photos
             </p>
 
             {/* Demo thumbnail strip */}
@@ -277,7 +284,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
               ) : (
                 <div className="flex items-center gap-2 text-orange-600 font-medium bg-orange-50 px-4 py-2 rounded-full text-sm">
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Uploading {successfulCount} / {files.length}
+                  Photos uploaded — finding your best photos...
                 </div>
               )}
             </div>
@@ -336,7 +343,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
             </div>
             
             {errorCount > 0 && !isProcessing && (
-              <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+              <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end gap-3">
                 <button 
                   onClick={handleStartUpload}
                   className="flex items-center gap-2 text-red-600 hover:text-red-700 font-medium bg-red-50 hover:bg-red-100 px-4 py-2 rounded-full transition-colors text-sm"
@@ -344,6 +351,14 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
                   <RefreshCw className="w-4 h-4" />
                   Retry {errorCount} Failed
                 </button>
+                {successfulCount > 0 && (
+                  <button 
+                    onClick={() => onUploadsCompleted()}
+                    className="flex items-center gap-2 text-slate-600 hover:text-slate-800 font-medium bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-full transition-colors text-sm"
+                  >
+                    Continue to Results
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -358,7 +373,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
           }}
           className="hidden" 
           multiple 
-          accept="image/jpeg,image/png,image/webp,image/heic,.heic" 
+          accept="image/jpeg,image/png,image/webp" 
         />
       </div>
     </div>
