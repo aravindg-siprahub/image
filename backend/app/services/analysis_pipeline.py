@@ -1,11 +1,23 @@
 """
-Analysis Pipeline:
-  1. Wait for all images to finish background ML processing.
-  2. Group similar images (currently each-image-its-own-group stub).
-  3. For each group, mark the best image as 'keep' and others as 'replace'.
-  4. Images with is_usable=False get 'remove' regardless.
-  5. The image with the highest final_score across ALL groups gets tagged as the top pick.
-  6. Commit final recommendations.
+Analysis Pipeline — two-stage smart selection.
+
+Stage 1: Absolute floor gate (QUALITY_FLOOR = 35)
+  Any image below this is clearly unusable (severe blur / bad exposure / corrupted).
+  These are always rejected.
+
+Stage 2: Relative quality threshold (QUALITY_THRESHOLD = 45)
+  Images above this absolute threshold are always kept.
+  Images between FLOOR and THRESHOLD:
+    - If they are the BEST image in their similarity group → keep (relative winner).
+    - Otherwise → remove (weaker duplicate/borderline shot).
+
+This means:
+  - A burst of 5 nearly-identical shots where all score 40-55:
+      → the best one is kept (relative winner), the rest removed.
+  - 5 clearly different photos all scoring 48:
+      → all 5 are kept (all are relative winners of their own solo groups).
+  - A photo scoring 30 (severe blur / black frame):
+      → always rejected (below floor).
 """
 import asyncio
 import logging
@@ -18,23 +30,23 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 async def run_analysis_pipeline(project_id: str):
     async with AsyncSessionLocal() as db:
         try:
-            # --- Step 1: Wait for background processing to finish ---
-            # Max wait time 30 seconds
+            # --- Step 1: Wait for background ML processing (max 30 s) ---
             for _ in range(30):
                 stmt = select(Image).where(
                     Image.project_id == project_id,
                     Image.status == "uploaded"
                 )
                 result = await db.execute(stmt)
-                pending_images = result.scalars().all()
-                if not pending_images:
+                pending = result.scalars().all()
+                if not pending:
                     break
                 await asyncio.sleep(1)
 
-            # Fetch all successfully analyzed images
+            # Fetch successfully analyzed images
             stmt = select(Image).where(
                 Image.project_id == project_id,
                 Image.status == "analyzed"
@@ -46,14 +58,14 @@ async def run_analysis_pipeline(project_id: str):
                 logger.info(f"No analyzed images for project {project_id}")
                 return
 
-            # Fetch all analysis records
+            # Fetch all analysis records in one query (no N+1)
             stmt = select(ImageAnalysis).where(
                 ImageAnalysis.image_id.in_([img.id for img in analyzed_images])
             )
             result = await db.execute(stmt)
             valid_analyses = result.scalars().all()
 
-            # --- Step 4: Similarity grouping ---
+            # --- Step 2: Similarity grouping ---
             groups = similarity_service.cluster_images(analyzed_images)
 
             logger.info(
@@ -61,12 +73,13 @@ async def run_analysis_pipeline(project_id: str):
                 f"(real_embeddings={similarity_service.is_real_implementation()})"
             )
 
-            # Build a lookup from image_id → analysis for efficient access
             analysis_by_image_id: dict[str, ImageAnalysis] = {
                 a.image_id: a for a in valid_analyses
             }
 
-            # --- Step 5: Best-of-group selection ---
+            # --- Step 3: Best-of-group selection ---
+            # Pick the best image from each similarity group.
+            # Weaker near-duplicates in the same group → removed immediately.
             group_winners: list[ImageAnalysis] = []
 
             for group_id, group_imgs in groups.items():
@@ -78,57 +91,89 @@ async def run_analysis_pipeline(project_id: str):
                 if not group_analyses:
                     continue
 
-                # Sort group by final_score descending — best first
+                # Sort by final_score descending
                 group_analyses.sort(key=lambda a: a.final_score or 0.0, reverse=True)
 
                 best = group_analyses[0]
                 best.similarity_group = group_id
 
-                # Mark all weaker near-duplicates as removed immediately
+                # Mark weaker near-duplicates as removed
                 for other in group_analyses[1:]:
                     other.similarity_group = group_id
                     other.recommendation = "remove"
+                    logger.debug(
+                        f"Removed near-duplicate image {other.image_id[:8]} "
+                        f"(score={other.final_score:.1f}) from group {group_id}"
+                    )
 
-                # Best candidate moves on to quality threshold check
                 group_winners.append(best)
 
-            # --- Step 5b: Quality threshold — keep EVERY winner that is good enough ---
-            QUALITY_THRESHOLD = settings.QUALITY_THRESHOLD
+            # --- Step 4: Two-stage quality decision ---
+            QUALITY_THRESHOLD = settings.QUALITY_THRESHOLD  # keep if score >= this
+            QUALITY_FLOOR = settings.QUALITY_FLOOR          # reject if score < this
 
             for winner in group_winners:
                 score = winner.final_score or 0.0
+                image_id_short = winner.image_id[:8]
+
+                # Gate A: explicitly not usable (corrupted / flagged)
                 if not winner.is_usable:
                     winner.recommendation = "remove"
+                    logger.info(f"[REMOVE] {image_id_short}: not usable")
+
+                # Gate B: below absolute floor → clearly unusable
+                elif score < QUALITY_FLOOR:
+                    winner.recommendation = "remove"
+                    logger.info(
+                        f"[REMOVE] {image_id_short}: score={score:.1f} below floor={QUALITY_FLOOR}"
+                    )
+
+                # Gate C: above quality threshold → definitely keep
                 elif score >= QUALITY_THRESHOLD:
                     winner.recommendation = "keep"
-                else:
-                    winner.recommendation = "remove"
+                    logger.info(
+                        f"[KEEP]   {image_id_short}: score={score:.1f} >= threshold={QUALITY_THRESHOLD}"
+                    )
 
-            # Any analysis not assigned a recommendation yet → remove
+                # Gate D: between floor and threshold → relative winner
+                # It survived similarity grouping, so it's the best available
+                # version of this scene. Keep it.
+                else:
+                    winner.recommendation = "keep"
+                    logger.info(
+                        f"[KEEP]   {image_id_short}: score={score:.1f} is relative winner "
+                        f"(floor={QUALITY_FLOOR}, threshold={QUALITY_THRESHOLD})"
+                    )
+
+            # Catch any analysis records that were never assigned
             for analysis in valid_analyses:
                 if analysis.recommendation is None:
                     analysis.recommendation = "remove"
 
-            # --- Step 7: Identify the global top pick ---
+            # --- Step 5: Logging summary ---
             keep_analyses = [a for a in valid_analyses if a.recommendation == "keep"]
-            if keep_analyses:
-                top_pick = max(keep_analyses, key=lambda a: a.final_score or 0.0)
-                logger.info(
-                    f"Top pick: image_id={top_pick.image_id}, "
-                    f"final_score={top_pick.final_score:.1f}, "
-                    f"group={top_pick.similarity_group}"
-                )
-            else:
-                logger.info("No images met the quality threshold. Returning empty selection.")
-
-            # --- Step 8: Final commit ---
-            await db.commit()
+            remove_analyses = [a for a in valid_analyses if a.recommendation == "remove"]
 
             logger.info(
                 f"Pipeline complete for project {project_id}: "
-                f"{len(valid_analyses)} analyzed, "
-                f"{len(keep_analyses)} recommended to keep"
+                f"{len(valid_analyses)} analyzed → "
+                f"{len(keep_analyses)} kept, {len(remove_analyses)} removed"
             )
+
+            if keep_analyses:
+                top = max(keep_analyses, key=lambda a: a.final_score or 0.0)
+                logger.info(
+                    f"Top pick: image_id={top.image_id[:8]}, "
+                    f"score={top.final_score:.1f}"
+                )
+            else:
+                logger.info(
+                    "No images met the quality floor. "
+                    "All photos were too blurry, dark or corrupted."
+                )
+
+            # --- Step 6: Commit ---
+            await db.commit()
 
         except Exception as e:
             logger.error(f"Pipeline error for project {project_id}: {e}", exc_info=True)

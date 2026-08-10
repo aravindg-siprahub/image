@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Bound CPU inference to prevent overloading Railway's 1vCPU limit
 CPU_INFERENCE_SEMAPHORE = asyncio.BoundedSemaphore(4)
 
+
 async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> None:
     async with AsyncSessionLocal() as db:
         try:
@@ -24,31 +25,50 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
                 logger.error(f"Image {image_id} not found for background analysis.")
                 return
 
-            # Fast technical checks
+            # Fast technical checks (includes face detection)
             tech_data = await asyncio.to_thread(technical_analyzer.analyze, image_bytes)
-            
+
             if tech_data.get("is_corrupted"):
                 logger.error(f"Image {image.id} is corrupted or invalid.")
                 image.status = "failed"
                 await db.commit()
                 return
 
-            # NIMA MobileNet aesthetic check
+            # NIMA MobileNet aesthetic check (CPU-bounded)
             async with CPU_INFERENCE_SEMAPHORE:
                 nima_data = await asyncio.to_thread(nima_service.analyze_image, image_bytes)
-            
-            # Merge data for the ranker
+
+            # --- Build analysis_data dict ---
+            # NIMA aesthetic score is used ONCE as visual_appeal only.
+            # composition and lighting are derived independently from technical signals
+            # so the same number does NOT get triple-counted.
+            aesthetic_score = nima_data.get("aesthetic_score", 50.0)
+
+            # Composition proxy: balanced blend of sharpness + exposure quality.
+            # Higher sharpness + balanced exposure → better composition quality signal.
+            sharpness = tech_data.get("sharpness", 50.0)
+            exposure = tech_data.get("exposure", 50.0)
+            # Exposure quality bell (peaks around 55-65): penalise extremes
+            exp_quality = max(0.0, 100.0 - abs(exposure - 60.0) * 1.6)
+            composition_proxy = round(sharpness * 0.50 + exp_quality * 0.50, 2)
+
+            # Lighting proxy: directly from exposure quality
+            lighting_proxy = round(exp_quality, 2)
+
+            # Face quality from technical analyzer (None if no face detected)
+            face_quality = tech_data.get("face_quality")   # float 0-100 or None
+            face_detected = tech_data.get("face_detected", False)
+
             analysis_data = {
-                "sharpness": tech_data.get("sharpness", 50.0),
-                "blur": tech_data.get("blur", 50.0),
-                "exposure": tech_data.get("exposure", 50.0),
-                "visual_appeal": nima_data.get("aesthetic_score", 50.0),
-                # Composition/lighting mapped to aesthetic score for ranker compatibility
-                "composition": nima_data.get("aesthetic_score", 50.0), 
-                "lighting": nima_data.get("aesthetic_score", 50.0),
-                # Subject clarity mapped to sharpness for now since we lack semantic models
-                "subject_clarity": tech_data.get("sharpness", 50.0),
-                "technical_quality": tech_data.get("sharpness", 50.0),
+                "sharpness":         sharpness,
+                "blur":              tech_data.get("blur", 50.0),
+                "exposure":          exposure,
+                "visual_appeal":     aesthetic_score,      # NIMA used once only
+                "composition":       composition_proxy,    # independent proxy
+                "lighting":          lighting_proxy,       # independent proxy
+                "subject_clarity":   sharpness,            # best proxy without semantic model
+                "technical_quality": sharpness,
+                "face_quality":      face_quality,         # None or 0-100
             }
 
             # Python deterministic scoring
@@ -57,15 +77,15 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
             # Build ImageAnalysis record
             analysis = ImageAnalysis(
                 image_id=image.id,
-                sharpness_score=analysis_data.get("sharpness"),
-                blur_score=analysis_data.get("blur"),
-                exposure_score=analysis_data.get("exposure"),
-                lighting_score=analysis_data.get("lighting"),
-                composition_score=analysis_data.get("composition"),
-                subject_clarity_score=analysis_data.get("subject_clarity"),
-                face_quality_score=None,
-                visual_appeal_score=analysis_data.get("visual_appeal"),
-                technical_quality_score=analysis_data.get("technical_quality"),
+                sharpness_score=sharpness,
+                blur_score=analysis_data["blur"],
+                exposure_score=exposure,
+                lighting_score=lighting_proxy,
+                composition_score=composition_proxy,
+                subject_clarity_score=sharpness,
+                face_quality_score=face_quality,
+                visual_appeal_score=aesthetic_score,
+                technical_quality_score=sharpness,
                 is_usable=True,
                 reason="Local ML pipeline analysis",
                 final_score=final_score,
@@ -77,8 +97,10 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
             await db.commit()
 
             logger.info(
-                f"Image {image.id} analyzed locally: final_score={final_score:.1f}, "
-                f"blur={analysis_data['blur']}, aesthetic={analysis_data['visual_appeal']}"
+                f"Image {image.id} analyzed: final_score={final_score:.1f}, "
+                f"sharpness={sharpness:.1f}, exposure={exposure:.1f}, "
+                f"aesthetic={aesthetic_score:.1f}, face_detected={face_detected}, "
+                f"face_quality={face_quality}"
             )
 
         except Exception as e:

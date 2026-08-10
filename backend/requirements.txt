@@ -16,3 +16,4 @@ scikit-learn
 scipy
 python-dotenv
 onnxruntime
+opencv-python-headless
