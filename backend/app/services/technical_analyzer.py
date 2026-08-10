@@ -12,22 +12,9 @@ logger = logging.getLogger(__name__)
 
 # ── Face cascade — load ONCE at module startup ───────────────────────────────
 # CascadeClassifier reads+parses an XML file each time it's constructed.
-# With 20 images that's 20 XML parses (~50ms each). Cache it here instead.
+# However, due to NumPy conflicts causing cv2 to crash on import, we defer this to inside the function.
 _cv2 = None
 _FACE_CASCADE = None
-try:
-    import cv2 as _cv2
-    _cascade_path = _cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    _FACE_CASCADE = _cv2.CascadeClassifier(_cascade_path)
-    if _FACE_CASCADE.empty():
-        _FACE_CASCADE = None
-        logger.warning("Haar cascade loaded but empty — face detection disabled")
-    else:
-        logger.info("Haar face cascade loaded successfully (cached at module level)")
-except ImportError:
-    logger.info("OpenCV not installed — face detection disabled")
-except Exception as e:
-    logger.warning(f"Could not load Haar cascade: {e} — face detection disabled")
 
 
 class TechnicalAnalyzer:
