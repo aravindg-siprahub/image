@@ -7,9 +7,8 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build --no-lint",
-    "start": "next start",
-    "lint": "eslint"
+    "build": "next build",
+    "start": "next start"
   },
   "dependencies": {
     "lucide-react": "^1.30.0",
