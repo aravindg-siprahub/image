@@ -25,17 +25,16 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
                 logger.error(f"Image {image_id} not found for background analysis.")
                 return
 
-            # Fast technical checks (includes face detection)
-            tech_data = await asyncio.to_thread(technical_analyzer.analyze, image_bytes)
-
-            if tech_data.get("is_corrupted"):
-                logger.error(f"Image {image.id} is corrupted or invalid.")
-                image.status = "failed"
-                await db.commit()
-                return
-
-            # NIMA MobileNet aesthetic check (CPU-bounded)
+            # Fast technical checks and NIMA (CPU-bounded + Memory-bounded)
             async with CPU_INFERENCE_SEMAPHORE:
+                tech_data = await asyncio.to_thread(technical_analyzer.analyze, image_bytes)
+
+                if tech_data.get("is_corrupted"):
+                    logger.error(f"Image {image.id} is corrupted or invalid.")
+                    image.status = "failed"
+                    await db.commit()
+                    return
+
                 nima_data = await asyncio.to_thread(nima_service.analyze_image, image_bytes)
 
             # --- Build analysis_data dict ---

@@ -53,13 +53,15 @@ class TechnicalAnalyzer:
             # Reopen for real processing
             with Image.open(io.BytesIO(image_bytes)) as img:
                 orig_w, orig_h = img.width, img.height
-                gray_img = img.convert("L")
 
-                # Resize for consistent processing
+                # FIX OOM: Resize immediately using thumbnail BEFORE converting to L
+                # This prevents PIL from allocating the full 108MP array in memory.
                 max_dim = 800
-                if max(gray_img.width, gray_img.height) > max_dim:
-                    gray_img = gray_img.copy()
-                    gray_img.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
+                if max(orig_w, orig_h) > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                
+                # Now convert to Grayscale safely
+                gray_img = img.convert("L")
 
                 gray_array = np.array(gray_img, dtype=np.float32)
 
