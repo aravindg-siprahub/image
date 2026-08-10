@@ -79,9 +79,9 @@ async def run_analysis_pipeline(project_id: str):
             )
 
             # --- Step 2: Similarity grouping ---
-            # threshold=0.95 means only near-identical frames are grouped.
-            # Different poses of the same people → separate groups → all get quality decision.
-            groups = similarity_service.cluster_images(analyzed_images)
+            # BYPASS: Skip memory-intensive similarity grouping to prevent OOM
+            # Put every image in its own unique group
+            groups = { f"group_{i}": [a.image] for i, a in enumerate(valid_analyses) }
 
             logger.info(
                 f"Similarity grouping: {len(analyzed_images)} images → {len(groups)} groups "
