@@ -38,8 +38,10 @@ async def upload_image(
         )
         
     try:
-        # Upload to Supabase (original only)
-        storage_path = storage_service.upload_image(
+        import asyncio
+        # Upload to Supabase (original only) - Use thread to avoid blocking event loop
+        storage_path = await asyncio.to_thread(
+            storage_service.upload_image,
             project_id=project_id,
             filename=file.filename or "unknown",
             file_bytes=file_bytes,
@@ -95,8 +97,9 @@ async def proxy_image(
         raise HTTPException(status_code=400, detail="Invalid storage path")
         
     try:
-        # 3. Download from Supabase and stream back
-        file_bytes = storage_service.download_image(image.storage_path)
+        import asyncio
+        # 3. Download from Supabase and stream back (Use thread to avoid blocking event loop)
+        file_bytes = await asyncio.to_thread(storage_service.download_image, image.storage_path)
 
         # 4. Derive extension from storage path
         ext = image.storage_path.rsplit(".", 1)[-1].lower() if "." in image.storage_path else "jpg"
