@@ -9,9 +9,6 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  experimental: {
-    memoryBasedWorkersCount: true,
-  }
 };
 
 export default nextConfig;
