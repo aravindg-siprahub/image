@@ -18,7 +18,7 @@ interface FileWithStatus {
   error?: string;
 }
 
-const MAX_CONCURRENT_UPLOADS = 3; // Reduced from 5 for safe mobile uploads
+const MAX_CONCURRENT_UPLOADS = 1; // Extremely safe for mobile uploads (prevents connection drops & OOM)
 
 export default function UploadZone({ onUploadsStarted, onUploadsCompleted, projectId, triggerRef }: UploadZoneProps) {
   const [files, setFiles] = useState<FileWithStatus[]>([]);
@@ -99,10 +99,10 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
   };
 
   const handleStartUpload = async () => {
-    if (files.length === 0 || isProcessing) return;
-    
+    if (files.length === 0) return;
+    if (isProcessing) return;
     setIsProcessing(true);
-    setErrorMsg(null);
+    setErrorMsg(null); // Clear previous errors when retrying
     
     let currentProjectId = projectId;
     
@@ -163,13 +163,27 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
           activeUploads++;
           
           // Update status to uploading
+          // Update status to uploading
           setFiles(prev => {
             const newFiles = [...prev];
             newFiles[item.originalIndex].status = "uploading";
             return newFiles;
           });
           
-          uploadImage(currentProjectId as string, item.file)
+          // Safe wrapper with 2 retries for mobile network flakiness
+          const uploadWithRetry = async (file: File, retries = 2) => {
+            for (let i = 0; i <= retries; i++) {
+              try {
+                await uploadImage(currentProjectId as string, file);
+                return;
+              } catch (err) {
+                if (i === retries) throw err;
+                await new Promise(r => setTimeout(r, 1000));
+              }
+            }
+          };
+
+          uploadWithRetry(item.file)
             .then(() => {
               currentSuccessCount++;
               setFiles(prev => {
