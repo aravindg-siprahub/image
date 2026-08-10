@@ -3,6 +3,11 @@ from PIL import Image, ImageStat
 import io
 import logging
 
+# Modern smartphone photos can be 12-108+ megapixels (e.g. Samsung S21 Ultra).
+# PIL's default 89MP decompression-bomb check would reject these entirely.
+# We resize immediately to max_dim=800 so the full resolution is never held in memory.
+Image.MAX_IMAGE_PIXELS = None  # disable bomb check — we resize immediately after opening
+
 logger = logging.getLogger(__name__)
 
 
