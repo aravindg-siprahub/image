@@ -27,52 +27,31 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
                 return
 
             # Fast technical checks and NIMA (CPU-bounded + Memory-bounded)
-            async with CPU_INFERENCE_SEMAPHORE:
-                tech_data = await asyncio.to_thread(technical_analyzer.analyze, image_bytes)
-
-                if tech_data.get("is_corrupted"):
-                    logger.error(f"Image {image.id} is corrupted or invalid.")
-                    image.status = "failed"
-                    await db.commit()
-                    return
-
-                nima_data = await asyncio.to_thread(nima_service.analyze_image, image_bytes)
-
-            # --- Build analysis_data dict ---
-            # NIMA aesthetic score is used ONCE as visual_appeal only.
-            # composition and lighting are derived independently from technical signals
-            # so the same number does NOT get triple-counted.
-            aesthetic_score = nima_data.get("aesthetic_score", 50.0)
-
-            # Composition proxy: balanced blend of sharpness + exposure quality.
-            # Higher sharpness + balanced exposure → better composition quality signal.
-            sharpness = tech_data.get("sharpness", 50.0)
-            exposure = tech_data.get("exposure", 50.0)
-            # Exposure quality bell (peaks around 55-65): penalise extremes
-            exp_quality = max(0.0, 100.0 - abs(exposure - 60.0) * 1.6)
-            composition_proxy = round(sharpness * 0.50 + exp_quality * 0.50, 2)
-
-            # Lighting proxy: directly from exposure quality
-            lighting_proxy = round(exp_quality, 2)
-
-            # Face quality from technical analyzer (None if no face detected)
-            face_quality = tech_data.get("face_quality")   # float 0-100 or None
-            face_detected = tech_data.get("face_detected", False)
+            # BYPASS: User requested safe mode without rejection/ML processing
+            # We skip the heavy ML processing completely to guarantee stability on mobile
+            
+            sharpness = 100.0
+            exposure = 50.0
+            aesthetic_score = 100.0
+            composition_proxy = 100.0
+            lighting_proxy = 100.0
+            face_quality = 100.0
+            face_detected = True
 
             analysis_data = {
                 "sharpness":         sharpness,
-                "blur":              tech_data.get("blur", 50.0),
+                "blur":              0.0,
                 "exposure":          exposure,
-                "visual_appeal":     aesthetic_score,      # NIMA used once only
-                "composition":       composition_proxy,    # independent proxy
-                "lighting":          lighting_proxy,       # independent proxy
-                "subject_clarity":   sharpness,            # best proxy without semantic model
+                "visual_appeal":     aesthetic_score,
+                "composition":       composition_proxy,
+                "lighting":          lighting_proxy,
+                "subject_clarity":   sharpness,
                 "technical_quality": sharpness,
-                "face_quality":      face_quality,         # None or 0-100
+                "face_quality":      face_quality,
             }
 
-            # Python deterministic scoring
-            final_score = ranker.calculate_deterministic_score(analysis_data, is_usable=True)
+            # Python deterministic scoring (will be 100)
+            final_score = 100.0
 
             # Build ImageAnalysis record
             analysis = ImageAnalysis(
@@ -87,7 +66,7 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
                 visual_appeal_score=aesthetic_score,
                 technical_quality_score=sharpness,
                 is_usable=True,
-                reason="Local ML pipeline analysis",
+                reason="Auto-kept (Safe mode)",
                 final_score=final_score,
             )
 
@@ -97,10 +76,7 @@ async def analyze_single_image_background(image_id: str, image_bytes: bytes) -> 
             await db.commit()
 
             logger.info(
-                f"Image {image.id} analyzed: final_score={final_score:.1f}, "
-                f"sharpness={sharpness:.1f}, exposure={exposure:.1f}, "
-                f"aesthetic={aesthetic_score:.1f}, face_detected={face_detected}, "
-                f"face_quality={face_quality}"
+                f"Image {image.id} analyzed (SAFE MODE): final_score={final_score:.1f}"
             )
 
         except Exception as e:

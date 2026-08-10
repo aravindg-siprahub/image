@@ -112,22 +112,22 @@ async def run_analysis_pipeline(project_id: str):
 
                 best = group_analyses[0]
                 best.similarity_group = group_id
+                group_winners.append(best)
 
                 if len(group_analyses) > 1:
                     scores = [f"{a.image_id[:6]}={a.final_score:.1f}" for a in group_analyses]
                     logger.info(
                         f"Group {group_id}: {len(group_analyses)} near-identical photos. "
-                        f"Keeping best, removing {len(group_analyses)-1}. Scores: {scores}"
+                        f"SAFE MODE: Keeping ALL photos without rejection. Scores: {scores}"
                     )
+                    # SAFE MODE: Do not reject duplicates
+                    for weaker in group_analyses[1:]:
+                        weaker.is_usable = True
+                        weaker.reason = "Auto-kept (Safe mode - duplicate bypassed)"
+                        weaker.similarity_group = group_id
+                        group_winners.append(weaker) # Add them to winners so they go through Stage 2
 
-                # Mark weaker near-duplicates as removed
-                for other in group_analyses[1:]:
-                    other.similarity_group = group_id
-                    other.recommendation = "remove"
-
-                group_winners.append(best)
-
-            # --- Step 4: Two-stage quality decision on group winners ---
+            # --- Stage 2: Quality thresholding ---decision on group winners ---
             QUALITY_THRESHOLD = settings.QUALITY_THRESHOLD  # always keep above this
             QUALITY_FLOOR = settings.QUALITY_FLOOR          # always reject below this
 
