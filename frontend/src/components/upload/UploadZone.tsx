@@ -26,6 +26,12 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
+  // Track the latest state of files to avoid stale closures in handleUpload
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Expose trigger method to parent
@@ -180,9 +186,10 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
       uploadNext();
     });
     
-    // Check if any errors occurred
-    const errorCount = files.filter(f => f.status === "error").length;
-    const successCount = files.filter(f => f.status === "success").length;
+    // Check if any errors occurred using the LATEST state, not the stale closure
+    const currentFiles = filesRef.current;
+    const errorCount = currentFiles.filter(f => f.status === "error").length;
+    const successCount = currentFiles.filter(f => f.status === "success").length;
     
     if (errorCount > 0) {
       if (successCount === 0) {
