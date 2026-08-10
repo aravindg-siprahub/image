@@ -194,29 +194,45 @@ async def download_project_images(
 
     urls = await asyncio.gather(*[make_url(img.storage_path) for img, _ in rows])
 
-    # Build ZIP in memory
-    async def generate_zip():
-        zip_buffer = io.BytesIO()
-        async with httpx.AsyncClient(timeout=30) as client:
-            with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+    import tempfile
+    import os
+
+    # Build ZIP on disk to prevent OOM
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    temp_zip_path = temp_zip.name
+    temp_zip.close() # Close so we can write to it via zipfile
+
+    async def build_zip_on_disk():
+        async with httpx.AsyncClient(timeout=60) as client:
+            with zipfile.ZipFile(temp_zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for i, ((img, _), url) in enumerate(zip(rows, urls)):
                     if not url:
                         continue
                     try:
                         resp = await client.get(url)
                         resp.raise_for_status()
-                        # Derive extension from storage path
                         ext = img.storage_path.rsplit(".", 1)[-1] if "." in img.storage_path else "jpg"
                         filename = f"image_{i+1:03d}.{ext}"
                         zf.writestr(filename, resp.content)
-                    except Exception:
-                        pass
-        zip_buffer.seek(0)
-        yield zip_buffer.read()
+                    except Exception as e:
+                        print(f"Failed to zip {img.id}: {e}")
+
+    await build_zip_on_disk()
 
     filename = f"lensai_{project_id[:8]}_{filter}.zip"
-    return StreamingResponse(
-        generate_zip(),
+    
+    def cleanup_temp_file():
+        try:
+            if os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+        except Exception:
+            pass
+
+    return FileResponse(
+        path=temp_zip_path,
+        filename=filename,
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        background=BackgroundTask(cleanup_temp_file)
     )

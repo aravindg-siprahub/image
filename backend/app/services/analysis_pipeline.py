@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 async def run_analysis_pipeline(project_id: str):
     async with AsyncSessionLocal() as db:
         try:
-            # --- Step 1: Wait for background ML processing (max 60 s) ---
+            # --- Step 1: Wait for background ML processing (max 180 s) ---
             # Each image is analyzed in a background task started at upload time.
             # We just wait for all "uploaded" images to become "analyzed" or "failed".
             waited = 0
-            while waited < 60:
+            while waited < 180:
                 stmt = select(Image).where(
                     Image.project_id == project_id,
                     Image.status == "uploaded"
