@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     GROQ_DAILY_TOKEN_BUDGET: int = 200000
     GROQ_TOKEN_RESERVE_PER_IMAGE: int = 4000
     SIMILARITY_THRESHOLD: float = 0.90  # pHash+color combined similarity threshold
+    QUALITY_THRESHOLD: float = 60.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
 

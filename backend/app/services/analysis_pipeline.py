@@ -14,6 +14,7 @@ from app.models.image import Image
 from app.models.image_analysis import ImageAnalysis
 from app.services.similarity_service import similarity_service
 from app.db.session import AsyncSessionLocal
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ async def run_analysis_pipeline(project_id: str):
                 group_winners.append(best)
 
             # --- Step 5b: Quality threshold — keep EVERY winner that is good enough ---
-            QUALITY_THRESHOLD = 60.0
+            QUALITY_THRESHOLD = settings.QUALITY_THRESHOLD
 
             for winner in group_winners:
                 score = winner.final_score or 0.0

@@ -99,11 +99,9 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
 
     return (
       <div className="text-center py-24 bg-white rounded-2xl border border-slate-100 shadow-sm px-6">
-        <p className="text-2xl font-black text-slate-800 mb-2">No photos met the quality bar</p>
+        <p className="text-2xl font-black text-slate-800 mb-2">No strong photos found</p>
         <p className="text-slate-500">
-          {totalAnalyzed > 0
-            ? `The AI analyzed ${totalAnalyzed} photo${totalAnalyzed !== 1 ? "s" : ""} but none were sharp / well-exposed enough to recommend.`
-            : "No images were analyzed for this project."}
+          Try uploading clearer photos.
         </p>
       </div>
     );
