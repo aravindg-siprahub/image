@@ -26,12 +26,6 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
-  // Track the latest state of files to avoid stale closures in handleUpload
-  const filesRef = useRef(files);
-  useEffect(() => {
-    filesRef.current = files;
-  }, [files]);
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Expose trigger method to parent
@@ -133,13 +127,28 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
     const pendingFiles = files.map((f, i) => ({ ...f, originalIndex: i }))
                               .filter(f => f.status === "pending" || f.status === "error");
     
+    // If all files are already uploaded and we just clicked the button, proceed to analysis immediately.
     if (pendingFiles.length === 0) {
-      setIsProcessing(false);
+      if (files.filter(f => f.status === "success").length > 0) {
+        try {
+          await startAnalysis(currentProjectId as string);
+          onUploadsCompleted();
+        } catch (e: any) {
+          setErrorMsg(e.message || "Failed to start analysis");
+          setIsProcessing(false);
+        }
+      } else {
+        setIsProcessing(false);
+      }
       return;
     }
 
     let activeUploads = 0;
     let currentIndex = 0;
+    
+    // Track results locally to avoid React state timing bugs
+    let currentSuccessCount = files.filter(f => f.status === "success").length;
+    let currentErrorCount = 0; // We retry all error files, so we reset this for the current batch
     
     await new Promise<void>((resolve) => {
       const uploadNext = () => {
@@ -162,6 +171,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
           
           uploadImage(currentProjectId as string, item.file)
             .then(() => {
+              currentSuccessCount++;
               setFiles(prev => {
                 const newFiles = [...prev];
                 newFiles[item.originalIndex].status = "success";
@@ -169,6 +179,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
               });
             })
             .catch((err) => {
+              currentErrorCount++;
               setFiles(prev => {
                 const newFiles = [...prev];
                 newFiles[item.originalIndex].status = "error";
@@ -186,16 +197,12 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
       uploadNext();
     });
     
-    // Check if any errors occurred using the LATEST state, not the stale closure
-    const currentFiles = filesRef.current;
-    const errorCount = currentFiles.filter(f => f.status === "error").length;
-    const successCount = currentFiles.filter(f => f.status === "success").length;
-    
-    if (errorCount > 0) {
-      if (successCount === 0) {
+    // Check if any errors occurred using the 100% accurate local counters
+    if (currentErrorCount > 0) {
+      if (currentSuccessCount === 0) {
         setErrorMsg("Upload failed. Check your connection and try again.");
       } else {
-        setErrorMsg(`${successCount} photos uploaded. ${errorCount} couldn't be uploaded.`);
+        setErrorMsg(`${currentSuccessCount} photos uploaded. ${currentErrorCount} couldn't be uploaded.`);
         // Start analysis in background for the successful ones so they don't wait
         try { await startAnalysis(currentProjectId as string); } catch (e) {}
       }
@@ -204,7 +211,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
     }
     
     // If we have at least one success, start analysis
-    if (successCount > 0) {
+    if (currentSuccessCount > 0) {
       try {
         await startAnalysis(currentProjectId as string);
         onUploadsCompleted();
