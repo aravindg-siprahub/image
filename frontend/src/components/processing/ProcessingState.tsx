@@ -80,8 +80,8 @@ export default function ProcessingState({ projectId, onComplete }: ProcessingSta
 
     // First poll immediately
     pollStatus();
-    // Then every 1.5 seconds
-    timerRef.current = setInterval(pollStatus, 1500);
+    // Then every 1 second (was 1.5s — 500ms faster results)
+    timerRef.current = setInterval(pollStatus, 1000);
 
     return () => {
       mounted = false;
