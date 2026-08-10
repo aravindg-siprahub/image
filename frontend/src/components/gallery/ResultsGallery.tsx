@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { getProjectImages, downloadImages } from "@/lib/api";
 import { ImageRecord } from "@/types";
-import { AlertCircle, Loader2, Download, CheckCircle } from "lucide-react";
+import { AlertCircle, Loader2, Download, CheckCircle, Share2 } from "lucide-react";
 import ImageCard from "./ImageCard";
 
 interface ResultsGalleryProps {
@@ -120,20 +120,36 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
             Your Best Photos
           </h2>
           <p className="text-slate-500 font-medium mt-1 text-sm sm:text-base">
-            {bestPhotos.length} great {bestPhotos.length === 1 ? "photo" : "photos"} selected from {totalAnalyzed} analyzed
+            {bestPhotos.length} great {bestPhotos.length === 1 ? "photo" : "photos"} selected from {totalAnalyzed}
           </p>
         </div>
 
-        {/* Download all button */}
-        <button
-          onClick={handleDownloadAll}
-          className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-full bg-[#FF6B2C] text-white hover:bg-[#e85f22] active:scale-95 transition-all shadow-sm shrink-0 self-start sm:self-auto"
-        >
-          {downloadDone
-            ? <><CheckCircle className="w-4 h-4" /> Downloaded!</>
-            : <><Download className="w-4 h-4" /> Download Best Photos</>
-          }
-        </button>
+        {/* Actions */}
+        <div className="flex items-center gap-3 self-start sm:self-auto shrink-0">
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}/gallery/${projectId}`;
+              if (navigator.share) {
+                navigator.share({ title: "My Best Photos", url }).catch(()=>{});
+              } else {
+                navigator.clipboard.writeText(url);
+                alert("Gallery link copied!");
+              }
+            }}
+            className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-full bg-slate-100 text-slate-800 hover:bg-slate-200 active:scale-95 transition-all shadow-sm"
+          >
+            <Share2 className="w-4 h-4" /> Share All
+          </button>
+          <button
+            onClick={handleDownloadAll}
+            className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-full bg-[#FF6B2C] text-white hover:bg-[#e85f22] active:scale-95 transition-all shadow-sm"
+          >
+            {downloadDone
+              ? <><CheckCircle className="w-4 h-4" /> Downloaded!</>
+              : <><Download className="w-4 h-4" /> Download All</>
+            }
+          </button>
+        </div>
       </div>
 
       {/* ── Responsive grid ──

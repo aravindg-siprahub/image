@@ -6,6 +6,7 @@ from app.models.image import Image
 from app.models.image_analysis import ImageAnalysis
 from app.services.storage_service import storage_service
 from app.services.analysis_pipeline import run_analysis_pipeline
+from app.services.image_analyzer import analyze_single_image_background
 from sqlalchemy import select
 
 async def run_e2e():
@@ -41,13 +42,19 @@ async def run_e2e():
         db.add(invalid_img)
         await db.commit()
         
+        
         print(f"Created images: Valid({valid_img.id}), Invalid({invalid_img.id})")
         
-    print("4. Running pipeline...")
-    # Normally this is triggered by the API, but we'll run it directly to wait for it.
+    print("4. Running background ML analysis...")
+    await asyncio.gather(
+        analyze_single_image_background(str(valid_img.id), valid_img_bytes),
+        analyze_single_image_background(str(invalid_img.id), invalid_img_bytes)
+    )
+
+    print("5. Running pipeline...")
     await run_analysis_pipeline(project.id)
     
-    print("5. Verifying Results...")
+    print("6. Verifying Results...")
     async with AsyncSessionLocal() as db:
         # Check invalid
         stmt = select(Image).where(Image.id == invalid_img.id)

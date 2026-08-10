@@ -1,12 +1,19 @@
-// NEXT_PUBLIC_API_URL must be set in Railway to the deployed backend URL.
+// NEXT_PUBLIC_API_BASE_URL must be set in Railway to the deployed backend URL.
 // e.g. https://lensai-backend.up.railway.app/api/v1
 // Falls back to localhost for local development.
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
 
 export async function createProject(): Promise<{ id: string }> {
-  const res = await fetch(`${API_BASE}/projects/`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to create project");
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}/projects/`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to create project");
+    return res.json();
+  } catch (error: any) {
+    if (error.name === "TypeError" && error.message === "Failed to fetch") {
+      throw new Error("Unable to connect to the server. Please try again.");
+    }
+    throw error;
+  }
 }
 
 export async function uploadImage(projectId: string, file: File): Promise<any> {

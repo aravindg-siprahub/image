@@ -100,8 +100,8 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
         const proj = await createProject();
         currentProjectId = proj.id;
         onUploadsStarted(currentProjectId);
-      } catch (e) {
-        setErrorMsg("Failed to create project. Please try again.");
+      } catch (e: any) {
+        setErrorMsg(e.message || "Failed to create project. Please try again.");
         setIsProcessing(false);
         return;
       }

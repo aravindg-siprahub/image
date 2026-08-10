@@ -4,6 +4,8 @@ from app.db.session import get_db
 from app.services.storage_service import storage_service
 from app.models.image import Image
 from app.schemas.image import ImageResponse
+from fastapi import BackgroundTasks
+from app.services.image_analyzer import analyze_single_image_background
 
 router = APIRouter()
 
@@ -17,6 +19,7 @@ ALLOWED_MIME_TYPES = {
 
 @router.post("/upload", response_model=ImageResponse)
 async def upload_image(
+    background_tasks: BackgroundTasks,
     project_id: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
@@ -35,7 +38,7 @@ async def upload_image(
         )
         
     try:
-        # Upload to Supabase
+        # Upload to Supabase (original only)
         storage_path = storage_service.upload_image(
             project_id=project_id,
             filename=file.filename or "unknown",
@@ -43,8 +46,6 @@ async def upload_image(
             content_type=file.content_type
         )
         file_url = storage_service.get_public_url(storage_path)
-        # Additive: resized/compressed sibling for Groq proxy + similarity (original unchanged).
-        storage_service.upload_analysis_derivative(storage_path, file_bytes)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -62,6 +63,10 @@ async def upload_image(
         db.add(db_image)
         await db.commit()
         await db.refresh(db_image)
+        
+        # Start ML analysis in background using the bytes we already have in memory
+        background_tasks.add_task(analyze_single_image_background, str(db_image.id), file_bytes)
+        
         return db_image
     except Exception as e:
         await db.rollback()
@@ -91,7 +96,7 @@ async def proxy_image(
         
     try:
         # 3. Prefer resized analysis derivative (falls back to original if missing).
-        file_bytes = storage_service.download_analysis_or_original(image.storage_path)
+        file_bytes = storage_service.download_image(image.storage_path)
         
         # 4. Return as image/jpeg (or infer from path)
         return Response(content=file_bytes, media_type="image/jpeg", headers={

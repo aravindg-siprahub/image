@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Image Curation Platform"
+    CORS_ORIGINS: str = "http://localhost:3000"
     DATABASE_URL: str
     SUPABASE_URL: str
     SUPABASE_SERVICE_ROLE_KEY: str

@@ -10,9 +10,9 @@ supabase
 httpx
 python-multipart
 tenacity
-groq
 pillow
 numpy
 scikit-learn
 scipy
 python-dotenv
+onnxruntime

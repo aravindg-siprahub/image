@@ -8,10 +8,10 @@ from app.api.routes import images, projects
 
 app = FastAPI(title="AI Image Curation API")
 
-# CORS: allow localhost for dev + any Railway frontend URL set via ALLOWED_ORIGINS env var
-# Example Railway env var: ALLOWED_ORIGINS=https://my-frontend.up.railway.app
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
-allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+from app.core.config import settings
+
+# CORS: allow localhost for dev + any Railway frontend URL set via CORS_ORIGINS env var
+allowed_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,

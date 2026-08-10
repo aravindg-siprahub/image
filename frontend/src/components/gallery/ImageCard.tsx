@@ -72,12 +72,6 @@ export default function ImageCard({ image, index, projectId }: ImageCardProps) {
         <div className="absolute top-2.5 left-2.5 bg-white/95 backdrop-blur-sm text-slate-800 text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">
           #{index + 1}
         </div>
-
-        {/* Score badge — top-right */}
-        <div className={`absolute top-2.5 right-2.5 ${scoreBg} border text-[11px] font-black px-2.5 py-1 rounded-lg shadow-sm backdrop-blur-sm flex items-center gap-1`}>
-          <span className={scoreColor}>{score}</span>
-          <span className="text-slate-400 font-normal">/100</span>
-        </div>
       </div>
 
       {/* Action row */}

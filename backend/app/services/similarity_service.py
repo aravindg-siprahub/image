@@ -392,9 +392,8 @@ class SimilarityService:
         for img in images:
             emb = ImageEmbedding(img.id)
             try:
-                # Prefer resized analysis derivative (same asset Groq proxy serves).
-                from app.services.storage_service import storage_service as _storage
-                img_bytes = _storage.download_analysis_or_original(img.storage_path)
+                from app.services.storage_service import storage_service
+                img_bytes = storage_service.download_image(img.storage_path)
 
                 emb = self.compute_embedding(img_bytes, img.id)
                 if emb.ok:
