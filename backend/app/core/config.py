@@ -14,14 +14,18 @@ class Settings(BaseSettings):
     # Soft daily token budget (matches free-tier TPD). Skip Groq when remaining is too low.
     GROQ_DAILY_TOKEN_BUDGET: int = 200000
     GROQ_TOKEN_RESERVE_PER_IMAGE: int = 4000
-    SIMILARITY_THRESHOLD: float = 0.90  # pHash+color combined similarity threshold
+    SIMILARITY_THRESHOLD: float = 0.95  # pHash+color combined similarity threshold
 
     # Two-stage quality decision thresholds:
     #   QUALITY_THRESHOLD: images at or above this are always kept
     #   QUALITY_FLOOR:     images below this are always rejected (clearly unusable)
     #   Between floor and threshold: the relative winner of each similarity group is kept
-    QUALITY_THRESHOLD: float = 45.0
-    QUALITY_FLOOR: float = 35.0
+    #
+    # Camera photos (real indoor/group shots) typically score 38-75 on our log-scale
+    # sharpness pipeline. We keep any photo that is the best of its scene.
+    # Only true corruption/heavy blur/black frames fall below QUALITY_FLOOR=25.
+    QUALITY_THRESHOLD: float = 38.0
+    QUALITY_FLOOR: float = 25.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
 
