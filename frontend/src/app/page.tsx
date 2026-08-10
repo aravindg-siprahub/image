@@ -70,11 +70,7 @@ export default function Home() {
 
         {/* Results state */}
         {appState === "results" && projectId && (
-          <div className="animate-fade-in w-full max-w-6xl mx-auto px-6 py-14">
-            <div className="mb-10">
-              <h2 className="text-3xl font-black tracking-tight text-slate-900 mb-2">Your Curated Collection</h2>
-              <p className="text-slate-500">AI picked the strongest shots — ranked by visual quality.</p>
-            </div>
+          <div className="animate-fade-in w-full max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
             <ResultsGallery projectId={projectId} />
           </div>
         )}

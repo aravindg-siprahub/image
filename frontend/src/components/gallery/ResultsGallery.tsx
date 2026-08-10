@@ -15,6 +15,8 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadDone, setDownloadDone] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -29,11 +31,21 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
     return () => { mounted = false; };
   }, [projectId]);
 
-  const handleDownloadAll = useCallback(() => {
-    downloadImages(projectId, "keep");
-    setDownloadDone(true);
-    setTimeout(() => setDownloadDone(false), 2500);
-  }, [projectId]);
+  const handleDownloadAll = useCallback(async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadImages(projectId, "keep");
+      setDownloadDone(true);
+      setTimeout(() => setDownloadDone(false), 2500);
+    } catch (err: any) {
+      setDownloadError("Download failed. Please try again.");
+      setTimeout(() => setDownloadError(null), 4000);
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [projectId, isDownloading]);
 
   /* ── Loading ── */
   if (isLoading) {
@@ -118,7 +130,10 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
             Your Best Photos
           </h2>
           <p className="text-slate-500 font-medium mt-1 text-sm sm:text-base">
-            {bestPhotos.length} great {bestPhotos.length === 1 ? "photo" : "photos"} selected from {totalAnalyzed}
+            {bestPhotos.length === totalAnalyzed
+              ? `${bestPhotos.length} great ${bestPhotos.length === 1 ? "photo" : "photos"} — all worth keeping`
+              : `${bestPhotos.length} great ${bestPhotos.length === 1 ? "photo" : "photos"} selected from ${totalAnalyzed}`
+            }
           </p>
         </div>
 
@@ -140,13 +155,19 @@ export default function ResultsGallery({ projectId }: ResultsGalleryProps) {
           </button>
           <button
             onClick={handleDownloadAll}
-            className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-full bg-[#FF6B2C] text-white hover:bg-[#e85f22] active:scale-95 transition-all shadow-sm"
+            disabled={isDownloading}
+            className="flex items-center gap-2 text-sm font-bold px-5 py-2.5 rounded-full bg-[#FF6B2C] text-white hover:bg-[#e85f22] active:scale-95 transition-all shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {downloadDone
+            {isDownloading
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Preparing…</>
+              : downloadDone
               ? <><CheckCircle className="w-4 h-4" /> Downloaded!</>
               : <><Download className="w-4 h-4" /> Download All</>
             }
           </button>
+          {downloadError && (
+            <p className="text-xs text-red-500 font-medium mt-1 text-center">{downloadError}</p>
+          )}
         </div>
       </div>
 

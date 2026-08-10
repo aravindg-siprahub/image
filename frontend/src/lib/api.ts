@@ -47,17 +47,33 @@ export async function getProjectImages(projectId: string): Promise<any[]> {
 }
 
 /**
- * Triggers a browser download of a ZIP file from the backend.
+ * Downloads a ZIP of project images from the backend and saves it to the user's device.
+ * Uses fetch() + blob URL instead of a bare anchor href.
+ *
+ * Why? A bare <a href=...> to a cross-origin streaming endpoint is blocked by
+ * the browser for downloads. fetch() respects CORS (the backend allows the
+ * frontend origin), then we create a local blob: URL which the browser can
+ * safely save with Content-Disposition.
+ *
  * filter: "all" | "keep"
+ * Returns a promise so the caller can show a loading state.
  */
-export function downloadImages(projectId: string, filter: "all" | "keep" = "all") {
+export async function downloadImages(projectId: string, filter: "all" | "keep" = "keep"): Promise<void> {
   const url = `${API_BASE}/projects/${projectId}/download?filter=${filter}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`Download failed: ${msg}`);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `lensai_${filter}.zip`;
+  a.href = objectUrl;
+  a.download = `lensai_best_photos.zip`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
 }
 
 /**
