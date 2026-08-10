@@ -10,6 +10,25 @@ Image.MAX_IMAGE_PIXELS = None  # disable bomb check — we resize immediately af
 
 logger = logging.getLogger(__name__)
 
+# ── Face cascade — load ONCE at module startup ───────────────────────────────
+# CascadeClassifier reads+parses an XML file each time it's constructed.
+# With 20 images that's 20 XML parses (~50ms each). Cache it here instead.
+_cv2 = None
+_FACE_CASCADE = None
+try:
+    import cv2 as _cv2
+    _cascade_path = _cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    _FACE_CASCADE = _cv2.CascadeClassifier(_cascade_path)
+    if _FACE_CASCADE.empty():
+        _FACE_CASCADE = None
+        logger.warning("Haar cascade loaded but empty — face detection disabled")
+    else:
+        logger.info("Haar face cascade loaded successfully (cached at module level)")
+except ImportError:
+    logger.info("OpenCV not installed — face detection disabled")
+except Exception as e:
+    logger.warning(f"Could not load Haar cascade: {e} — face detection disabled")
+
 
 class TechnicalAnalyzer:
     def analyze(self, image_bytes: bytes) -> dict:
@@ -104,46 +123,31 @@ def _detect_faces(image_bytes: bytes) -> dict:
         face_count: int
         face_quality: float 0-100 or None (None means no face found — not a penalty)
 
-    Design rules:
-    - Face detection failure → face_quality = None (no penalty)
-    - Face detected → face_quality reflects face sharpness and relative size
-    - Eyes open/closed: we skip unreliable eye detection on CPU; instead we
-      rely on face_quality (face sharpness) which is strongly correlated with
-      eye clarity and overall portrait sharpness.
+    Performance: uses the module-level _FACE_CASCADE loaded once at startup.
+    Face detection failure → face_quality = None (not a penalty — we fall back
+    to image-level sharpness signals).
     """
     no_face = {"face_detected": False, "face_count": 0, "face_quality": None}
 
-    try:
-        import cv2
-        import numpy as np
-    except ImportError:
-        # OpenCV not installed — skip face detection gracefully
+    # Use the module-level cached cascade — loaded once, reused per image
+    if _FACE_CASCADE is None or _cv2 is None:
         return no_face
 
     try:
+        import numpy as np
         nparr = np.frombuffer(image_bytes, np.uint8)
-        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img_bgr = _cv2.imdecode(nparr, _cv2.IMREAD_COLOR)
         if img_bgr is None:
             return no_face
 
-        # Resize for faster detection (keep aspect ratio)
+        # Resize for faster detection (keep aspect ratio, max 640px)
         h, w = img_bgr.shape[:2]
         scale = min(1.0, 640.0 / max(h, w))
-        if scale < 1.0:
-            det_img = cv2.resize(img_bgr, (int(w * scale), int(h * scale)))
-        else:
-            det_img = img_bgr
+        det_img = _cv2.resize(img_bgr, (int(w * scale), int(h * scale))) if scale < 1.0 else img_bgr
 
-        gray = cv2.cvtColor(det_img, cv2.COLOR_BGR2GRAY)
+        gray = _cv2.cvtColor(det_img, _cv2.COLOR_BGR2GRAY)
 
-        # Use bundled Haar cascade (no download — ships with opencv-python)
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        face_cascade = cv2.CascadeClassifier(cascade_path)
-
-        if face_cascade.empty():
-            return no_face
-
-        faces = face_cascade.detectMultiScale(
+        faces = _FACE_CASCADE.detectMultiScale(
             gray,
             scaleFactor=1.1,
             minNeighbors=4,
@@ -158,13 +162,12 @@ def _detect_faces(image_bytes: bytes) -> dict:
         idx = int(np.argmax(areas))
         fx, fy, fw, fh = faces[idx]
 
-        # Face sharpness: Laplacian variance of the face crop
+        # Face sharpness: Laplacian variance of the face crop (log-scale)
         face_crop = gray[fy:fy + fh, fx:fx + fw]
         if face_crop.size > 0:
             face_lap_var = float(np.var(
-                cv2.Laplacian(face_crop.astype(np.float32), cv2.CV_32F)
+                _cv2.Laplacian(face_crop.astype(np.float32), _cv2.CV_32F)
             ))
-            # Same log-scale as full-image sharpness
             if face_lap_var > 0:
                 log_var = min(4.0, np.log10(face_lap_var + 1))
                 face_sharpness = min(100.0, max(0.0, log_var * 25.0))
@@ -176,9 +179,8 @@ def _detect_faces(image_bytes: bytes) -> dict:
         # Relative face size (fraction of image area) → 0-100
         det_h, det_w = det_img.shape[:2]
         face_area_frac = (fw * fh) / max(1, det_w * det_h)
-        face_size_score = min(100.0, face_area_frac * 500.0)  # 20% of frame → 100
+        face_size_score = min(100.0, face_area_frac * 500.0)
 
-        # face_quality = blend of sharpness and face size
         face_quality = round(face_sharpness * 0.75 + face_size_score * 0.25, 2)
 
         return {
