@@ -296,7 +296,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
           </div>
         ) : (
           <div className="p-8 relative z-10 min-h-[400px] flex flex-col">
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
               <h4 className="font-bold text-lg text-slate-900 flex items-center gap-2">
                 Selected Photos 
                 <span className="bg-slate-100 text-slate-600 text-xs py-1 px-2.5 rounded-full font-bold">{files.length}</span>
@@ -312,7 +312,7 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
               ) : (
                 <div className="flex items-center gap-2 text-orange-600 font-medium bg-orange-50 px-4 py-2 rounded-full text-sm">
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Photos uploaded — finding your best photos...
+                  Finding best photos...
                 </div>
               )}
             </div>
@@ -327,8 +327,8 @@ export default function UploadZone({ onUploadsStarted, onUploadsCompleted, proje
                   />
                   
                   {fileObj.status === "uploading" && (
-                    <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center">
-                      <RefreshCw className="w-6 h-6 text-orange-500 animate-spin" />
+                    <div className="absolute inset-0 bg-slate-900/30 flex items-center justify-center">
+                      <RefreshCw className="w-6 h-6 text-white animate-spin" />
                     </div>
                   )}
                   
